@@ -1,11 +1,19 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import requests
+import time
 from datetime import datetime, timezone
 
 app = Flask(__name__)
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
+
+# In-memory cache: avoids repeated provider requests for the same rounded location.
+# Render instances may restart, so this is a lightweight mitigation, not a shared cache.
+WEATHER_CACHE = {}
+WEATHER_CACHE_SECONDS = 900  # 15 minutes
+GEOCODE_CACHE = {}
+GEOCODE_CACHE_SECONDS = 86400  # 24 hours
 
 
 def find_location(query):
@@ -27,6 +35,11 @@ def find_location(query):
         except ValueError:
             pass
 
+    cache_key = query.casefold()
+    cached_place = GEOCODE_CACHE.get(cache_key)
+    if cached_place and time.time() - cached_place["saved_at"] < GEOCODE_CACHE_SECONDS:
+        return cached_place["data"]
+
     response = requests.get(
         GEOCODE_URL,
         params={"name": query, "count": 1, "language": "en", "format": "json"},
@@ -42,40 +55,59 @@ def find_location(query):
             place.get("name"), place.get("admin1"), place.get("country")
         ) if part
     )
-    return {
+    result = {
         "name": name,
         "latitude": place["latitude"],
         "longitude": place["longitude"],
     }
+    GEOCODE_CACHE[cache_key] = {"saved_at": time.time(), "data": result}
+    return result
 
 
 def get_weather(latitude, longitude):
-    response = requests.get(
-        WEATHER_URL,
-        params={
-            "latitude": latitude,
-            "longitude": longitude,
-            "current": (
-                "temperature_2m,relative_humidity_2m,precipitation,"
-                "weather_code,wind_speed_10m"
-            ),
-            "hourly": (
-                "temperature_2m,precipitation,precipitation_probability,"
-                "soil_moisture_0_to_10cm,soil_moisture_10_to_40cm"
-            ),
-            "daily": (
-                "temperature_2m_max,temperature_2m_min,precipitation_sum,"
-                "precipitation_probability_max"
-            ),
-            "forecast_days": 7,
-            "timezone": "auto",
-        },
-        timeout=20,
-    )
+    cache_key = (round(float(latitude), 3), round(float(longitude), 3))
+    cached = WEATHER_CACHE.get(cache_key)
+    if cached and time.time() - cached["saved_at"] < WEATHER_CACHE_SECONDS:
+        return cached["data"]
+
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "current": (
+            "temperature_2m,relative_humidity_2m,precipitation,"
+            "weather_code,wind_speed_10m"
+        ),
+        "hourly": (
+            "temperature_2m,precipitation,precipitation_probability,"
+            "soil_moisture_0_to_10cm,soil_moisture_10_to_40cm"
+        ),
+        "daily": (
+            "temperature_2m_max,temperature_2m_min,precipitation_sum,"
+            "precipitation_probability_max"
+        ),
+        "forecast_days": 7,
+        "timezone": "auto",
+    }
+
+    # Do not repeatedly retry HTTP 429; that can worsen rate limiting.
+    response = requests.get(WEATHER_URL, params=params, timeout=20)
+    if response.status_code == 429:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            raise ValueError(
+                "The weather provider is rate-limiting requests. "
+                f"Please wait at least {retry_after} seconds and try again."
+            )
+        raise ValueError(
+            "The weather provider is temporarily rate-limiting requests. "
+            "Please try again later."
+        )
     response.raise_for_status()
     data = response.json()
     if "current" not in data or "hourly" not in data or "daily" not in data:
         raise ValueError("Weather service returned incomplete data.")
+
+    WEATHER_CACHE[cache_key] = {"saved_at": time.time(), "data": data}
     return data
 
 
@@ -239,6 +271,15 @@ def analyze_field(form, weather, location):
     }
 
 
+@app.route("/service-worker.js")
+def service_worker():
+    """Serve the service worker from the site root so it can control the whole PWA."""
+    response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Service-Worker-Allowed"] = "/"
+    return response
+
+
 @app.route("/", methods=["GET", "POST"])
 def home():
     result = None
@@ -284,7 +325,9 @@ def api_weather():
         weather = get_weather(place["latitude"], place["longitude"])
         return jsonify({"location": place, "weather": weather})
     except (requests.RequestException, ValueError, KeyError) as exc:
-        return jsonify({"error": str(exc)}), 400
+        message = str(exc)
+        status = 429 if "rate-limit" in message.lower() or "rate limiting" in message.lower() else 400
+        return jsonify({"error": message}), status
 
 
 if __name__ == "__main__":
