@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<defs><linearGradient id="water" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#46c4ff"/><stop offset="1" stop-color="#0872e5"/></linearGradient><linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8ddd71"/><stop offset="1" stop-color="#168253"/></linearGradient></defs>
+<path d="M50 4C40 23 21 42 21 60a29 29 0 0 0 58 0C79 42 60 23 50 4Z" fill="url(#water)"/>
+<path d="M48 80C29 73 21 59 26 43c17 1 28 14 22 37Z" fill="url(#leaf)" stroke="#fff" stroke-width="2"/>
+<path d="M52 80C49 59 60 39 78 32c4 21-6 39-26 48Z" fill="#1c9b63" stroke="#fff" stroke-width="2"/>
+<path d="M50 84V47" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+</svg>

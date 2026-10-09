@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b3c70">
+  <meta name="description" content="AquaWise weather-aware irrigation decision support for farmers.">
+  <title>AquaWise — Smart Irrigation</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='images/logo.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</head>
+<body>
+  <section id="welcomeScreen" class="welcome-screen">
+    <div class="welcome-overlay"></div>
+    <div class="welcome-inner">
+      <a class="brand brand-light" href="#">
+        <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="" class="brand-logo">
+        <span><b>AquaWise</b><small>SMART IRRIGATION</small></span>
+      </a>
+      <p class="eyebrow">SMART WATER. HEALTHIER CROPS.</p>
+      <h1>Every drop grows<br><em>a better tomorrow.</em></h1>
+      <p class="welcome-copy">Weather-aware irrigation guidance, designed to help you make informed decisions for your field.</p>
+      <form id="welcomeForm" class="welcome-form">
+        <label for="welcomeLocation">Where is your field?</label>
+        <div class="location-input">
+          <span class="pin">⌖</span>
+          <input id="welcomeLocation" placeholder="Enter village, town or city" required>
+        </div>
+        <button type="submit" class="button button-primary">Explore my field <span>→</span></button>
+        <button type="button" id="useLocationButton" class="button button-glass">◎ Use my current location</button>
+        <p id="welcomeError" class="inline-error" aria-live="polite"></p>
+      </form>
+      <div class="welcome-foot"><span>🌱</span> Better decisions. Every drop.</div>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
+    <header class="topbar">
+      <a class="brand" href="#" id="homeBrand">
+        <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="" class="brand-logo">
+        <span><b>AquaWise</b><small>SMART IRRIGATION</small></span>
+      </a>
+      <nav class="topnav" aria-label="Main navigation">
+        <button class="nav-tab active" data-page="field"><span>⌂</span><span data-i18n="myField">My Field</span></button>
+        <button class="nav-tab" data-page="weather"><span>☼</span><span data-i18n="weatherCentre">Weather Centre</span></button>
+        <button class="nav-tab" data-page="history"><span>◷</span><span data-i18n="history">History</span></button>
+      </nav>
+      <div class="top-actions">
+        <span id="locationPill" class="location-pill">⌖ Location</span>
+        <select id="languageSelect" aria-label="Language">
+          <option value="en">English</option>
+          <option value="te">తెలుగు</option>
+          <option value="hi">हिन्दी</option>
+        </select>
+        <button id="installButton" class="install-button hidden" type="button">Install app</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <button class="side-link selected" data-page="field"><span class="side-icon">⌂</span><span><b data-i18n="myField">My Field</b><small data-i18n="fieldSub">Get irrigation advice</small></span></button>
+        <button class="side-link" data-page="weather"><span class="side-icon">☁</span><span><b data-i18n="weatherCentre">Weather Centre</b><small data-i18n="weatherSub">Live weather & forecast</small></span></button>
+        <button class="side-link" data-page="history"><span class="side-icon">◷</span><span><b data-i18n="history">History</b><small data-i18n="historySub">Your saved analyses</small></span></button>
+        <div class="sidebar-note">
+          <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="">
+          <b>Smarter irrigation<br>Healthier crops<br>Greener tomorrow</b>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <section id="fieldPage" class="page">
+          {% if error %}<div class="server-error" role="alert">{{ error }}</div>{% endif %}
+          <div class="field-hero">
+            <div class="field-hero-copy">
+              <p class="eyebrow">YOUR FIELD, OUR INSIGHTS</p>
+              <h1>Grow smarter<br>with every <em>drop.</em></h1>
+              <p>Combine your field details with local weather and model-estimated soil moisture.</p>
+            </div>
+            <div class="hero-weather-card">
+              <small id="heroDate">Local forecast</small>
+              <div class="hero-weather-row"><span id="heroWeatherIcon">☀</span><b id="heroTemp">--°C</b></div>
+              <span id="heroWeatherText">Loading weather…</span>
+              <div class="hero-weather-meta"><span id="heroHumidity">Humidity: --</span><span id="heroWind">Wind: --</span></div>
+            </div>
+          </div>
+
+          <form id="fieldForm" method="post" action="/">
+            <input type="hidden" id="fieldLocation" name="location" value="{{ form_data.location }}">
+            <section class="panel selection-panel">
+              <div class="step-heading"><span>1</span><div><h2 data-i18n="soilHeading">Select Soil Type</h2><p data-i18n="soilHelp">Choose the soil that best matches your field.</p></div></div>
+              <div class="image-options soil-options">
+                <label class="image-option">
+                  <input type="radio" name="soil" value="Red soil" {% if form_data.soil == 'Red soil' %}checked{% endif %} required>
+                  <img src="{{ url_for('static', filename='images/red-soil.jpg') }}" alt="Red soil sample">
+                  <b data-i18n="redSoil">Red Soil</b>
+                </label>
+                <label class="image-option">
+                  <input type="radio" name="soil" value="Black soil" {% if form_data.soil == 'Black soil' %}checked{% endif %}>
+                  <img src="{{ url_for('static', filename='images/black-soil.jpg') }}" alt="Black soil sample">
+                  <b data-i18n="blackSoil">Black Soil</b>
+                </label>
+                <label class="image-option">
+                  <input type="radio" name="soil" value="Sandy soil" {% if form_data.soil == 'Sandy soil' %}checked{% endif %}>
+                  <img src="{{ url_for('static', filename='images/sandy-soil.jpg') }}" alt="Sandy soil sample">
+                  <b data-i18n="sandySoil">Sandy Soil</b>
+                </label>
+                <label class="image-option">
+                  <input type="radio" name="soil" value="Clay soil" {% if form_data.soil == 'Clay soil' %}checked{% endif %}>
+                  <img src="{{ url_for('static', filename='images/clay-soil.jpg') }}" alt="Clay soil sample">
+                  <b data-i18n="claySoil">Clay Soil</b>
+                </label>
+                <label class="image-option">
+                  <input type="radio" name="soil" value="Loamy soil" {% if form_data.soil == 'Loamy soil' %}checked{% endif %}>
+                  <img src="{{ url_for('static', filename='images/loamy-soil.jpg') }}" alt="Loamy soil sample">
+                  <b data-i18n="loamySoil">Loamy Soil</b>
+                </label>
+              </div>
+
+              <div class="step-heading category-heading"><span>2</span><div><h2 data-i18n="categoryHeading">Select Crop Category</h2><p data-i18n="categoryHelp">Choose the category for your crop.</p></div></div>
+              <div class="image-options category-options">
+                <button class="image-option category-option" type="button" data-category="Grains">
+                  <img src="{{ url_for('static', filename='images/grains.jpg') }}" alt="Grain crops"><b data-i18n="grains">Grains</b>
+                </button>
+                <button class="image-option category-option" type="button" data-category="Pulses">
+                  <img src="{{ url_for('static', filename='images/pulses.jpg') }}" alt="Pulse crops"><b data-i18n="pulses">Pulses</b>
+                </button>
+                <button class="image-option category-option" type="button" data-category="Vegetables">
+                  <img src="{{ url_for('static', filename='images/vegetables.jpg') }}" alt="Vegetables"><b data-i18n="vegetables">Vegetables</b>
+                </button>
+                <button class="image-option category-option" type="button" data-category="Fruits">
+                  <img src="{{ url_for('static', filename='images/fruits.jpg') }}" alt="Fruit crops"><b data-i18n="fruits">Fruits</b>
+                </button>
+                <button class="image-option category-option" type="button" data-category="Cash crops">
+                  <img src="{{ url_for('static', filename='images/cash-crops.jpg') }}" alt="Cash crops"><b data-i18n="cashCrops">Cash Crops</b>
+                </button>
+              </div>
+              <input type="hidden" name="category" id="categoryValue" value="{{ form_data.category }}" required>
+
+              <div class="field-controls">
+                <div class="step-heading"><span>3</span><div><h2 data-i18n="specificCrop">Select Specific Crop</h2></div></div>
+                <label class="select-with-icon">
+                  <span class="select-emoji">🌱</span>
+                  <select name="crop" id="cropSelect" required>
+                    <option value="" data-i18n="chooseCrop">Choose crop</option>
+                  </select>
+                </label>
+              </div>
+              <div class="field-controls">
+                <div class="step-heading"><span>4</span><div><h2 data-i18n="growthStage">Select Crop Growth Stage (Age)</h2></div></div>
+                <label class="select-with-icon">
+                  <span class="select-emoji">🌿</span>
+                  <select name="stage" id="stageSelect" required>
+                    <option value="" data-i18n="chooseAge">Select age range</option>
+                    <option value="0–1 month" {% if form_data.stage == '0–1 month' %}selected{% endif %}>0–1 month · Early establishment</option>
+                    <option value="1–2 months" {% if form_data.stage == '1–2 months' %}selected{% endif %}>1–2 months · Early growth</option>
+                    <option value="2–3 months" {% if form_data.stage == '2–3 months' %}selected{% endif %}>2–3 months · Active growth</option>
+                    <option value="3–4 months" {% if form_data.stage == '3–4 months' %}selected{% endif %}>3–4 months · Development</option>
+                    <option value="4+ months" {% if form_data.stage == '4+ months' %}selected{% endif %}>4+ months · Later growth / maturity</option>
+                  </select>
+                </label>
+              </div>
+              <button class="analyse-button" type="submit"><span>♧</span><b data-i18n="analyse">Analyse My Field</b><span class="arrow">→</span></button>
+              <p class="form-footnote" data-i18n="formNote">Month ranges are general; actual crop stages vary by crop and climate.</p>
+            </section>
+          </form>
+
+          {% if error %}
+          <section id="analysisResult" class="panel error-panel">
+            <h2 data-i18n="analysisError">Analysis could not be completed</h2><p>{{ error }}</p>
+          </section>
+          {% endif %}
+
+          {% if result %}
+          <section id="analysisResult" class="panel result-panel status-{{ result.status }}">
+            <div class="result-title-row"><div><p class="eyebrow" data-i18n="analysisResult">ANALYSIS RESULT</p><h2>{{ result.decision }}</h2></div><span class="result-status-icon">{% if result.status == 'irrigate' %}💧{% elif result.status == 'wait' %}🌦{% elif result.status == 'dont-irrigate' %}⛔{% else %}🔎{% endif %}</span></div>
+            <p class="result-explanation">{{ result.explanation }}</p>
+            <div class="metric-grid">
+              <div class="metric"><small data-i18n="soilMoisture">Soil Moisture</small><strong>{% if result.moisture_pct is not none %}{{ result.moisture_pct }}%{% else %}N/A{% endif %}</strong><div class="moisture-track"><span style="width: {{ result.moisture_pct if result.moisture_pct is not none else 0 }}%"></span></div><small>Adjusted model estimate · {{ result.moisture_depth }}</small></div>
+              <div class="metric"><small data-i18n="temperature">Temperature</small><strong>{{ "%.1f"|format(result.temperature) }}°C</strong><small data-i18n="currentWeather">Current weather</small></div>
+              <div class="metric"><small data-i18n="forecastRain">Forecast Rainfall</small><strong>{{ result.future_rain }} mm</strong><small data-i18n="next24">Next 24 hours</small></div>
+              <div class="metric"><small data-i18n="humidity">Humidity</small><strong>{% if result.humidity is not none %}{{ result.humidity }}%{% else %}N/A{% endif %}</strong><small data-i18n="relativeHumidity">Relative humidity</small></div>
+            </div>
+            <h3 data-i18n="whyDecision">Why this decision?</h3>
+            <ol class="reason-list">{% for reason in result.reasons %}<li>{{ reason }}</li>{% endfor %}</ol>
+            <div class="disclaimer"><img src="{{ url_for('static', filename='images/logo.svg') }}" alt=""><span data-i18n="disclaimer">This is a model-based estimate. Always verify with field conditions and local agricultural advice.</span></div>
+            <button type="button" id="saveHistoryButton" class="save-button" data-i18n="saveHistory">Save to history</button>
+          </section>
+          {% endif %}
+
+          <section class="decision-guide panel">
+            <p class="eyebrow" data-i18n="decisionGuide">HOW AQUAWISE DECIDES</p>
+            <h2 data-i18n="understandAdvice">Understand your irrigation recommendation</h2>
+            <p class="guide-intro" data-i18n="guideIntro">These are prototype rules using model-estimated soil moisture and forecast rainfall. They are not universal crop irrigation thresholds.</p>
+            <div class="guide-grid">
+              <article class="guide-card irrigate-card"><span class="guide-icon">💧</span><h3 data-i18n="irrigateTitle">Irrigate — verify first</h3><p data-i18n="irrigateText">Low estimated moisture (below 15%) and less than 5 mm forecast rain. Check root-zone moisture and crop needs before watering.</p></article>
+              <article class="guide-card check-card"><span class="guide-icon">⌕</span><h3 data-i18n="checkTitle">Check the field</h3><p data-i18n="checkText">Moisture estimate unavailable or between 15% and 30%. Inspect the root zone, crop condition, and schedule before deciding.</p></article>
+              <article class="guide-card wait-card"><span class="guide-icon">🌦</span><h3 data-i18n="waitTitle">Wait — rain is forecast</h3><p data-i18n="waitText">At least 5 mm rain is forecast in the next 24 hours. Wait and reassess the field.</p></article>
+            </div>
+          </section>
+        </section>
+
+        <section id="weatherPage" class="page hidden">
+          <div class="section-banner"><p class="eyebrow">LOCAL CONDITIONS</p><h1 data-i18n="weatherTitle">Weather Centre</h1><p data-i18n="weatherIntro">Current conditions and the next seven days for your selected location.</p></div>
+          <div id="weatherLoading" class="panel">Loading weather…</div>
+          <div id="weatherError" class="panel error-panel hidden"></div>
+          <div id="weatherContent" class="hidden">
+            <div class="current-weather-panel panel"><div><small data-i18n="currentWeather">Current weather</small><strong id="weatherTemp">--°C</strong><p id="weatherSummary">Loading…</p><p id="weatherDetails"></p></div><div class="big-weather-icon" id="weatherIcon">☀</div></div>
+            <section class="panel"><h2 data-i18n="sevenDay">Seven-day forecast</h2><div id="forecastGrid" class="forecast-grid"></div></section>
+            <section class="panel"><h2 data-i18n="hourlyForecast">Hourly outlook</h2><div id="hourlyGrid" class="hourly-grid"></div></section>
+          </div>
+        </section>
+
+        <section id="historyPage" class="page hidden">
+          <div class="section-banner"><p class="eyebrow">YOUR ACTIVITY</p><h1 data-i18n="historyTitle">Analysis History</h1><p data-i18n="historyIntro">Review analyses saved on this device.</p></div>
+          <section class="panel"><div class="history-heading"><h2 data-i18n="savedAnalyses">Saved analyses</h2><button id="clearHistoryButton" class="text-button" data-i18n="clearHistory">Clear history</button></div><div id="historyList"></div></section>
+        </section>
+      </main>
+
+      <aside class="right-column">
+        <section class="panel result-preview">
+          <div class="right-heading"><img src="{{ url_for('static', filename='images/logo.svg') }}" alt=""><h2 data-i18n="analysisResult">Analysis Result</h2></div>
+          {% if result %}
+            <div class="recommendation-box status-{{ result.status }}"><small data-i18n="recommendation">Recommendation</small><h3>{{ result.decision }}</h3><p>{{ result.explanation }}</p></div>
+            <h3 class="subheading" data-i18n="fieldDetails">Field Details</h3>
+            <dl class="field-details"><dt>⌖ <span data-i18n="locationLabel">Location</span></dt><dd>{{ result.location }}</dd><dt>▦ <span data-i18n="soilLabel">Soil Type</span></dt><dd>{{ result.soil }}</dd><dt>♧ <span data-i18n="cropLabel">Crop</span></dt><dd>{{ result.crop }} ({{ result.category }})</dd><dt>⚙ <span data-i18n="stageLabel">Growth Stage</span></dt><dd>{{ result.stage }}</dd></dl>
+            <h3 class="subheading" data-i18n="keyMetrics">Key Metrics</h3>
+            <div class="mini-metrics"><div><small data-i18n="soilMoisture">Soil Moisture</small><b>{% if result.moisture_pct is not none %}{{ result.moisture_pct }}%{% else %}N/A{% endif %}</b></div><div><small data-i18n="temperature">Temperature</small><b>{{ "%.1f"|format(result.temperature) }}°C</b></div><div><small data-i18n="forecastRain">Forecast Rain</small><b>{{ result.future_rain }} mm</b></div></div>
+            <h3 class="subheading" data-i18n="whyDecision">Why this decision?</h3><ol class="compact-reasons">{% for reason in result.reasons[:3] %}<li>{{ reason }}</li>{% endfor %}</ol>
+          {% else %}
+            <div class="empty-result"><div class="empty-drop">💧</div><h3 data-i18n="readyToAnalyse">Ready to analyse your field</h3><p data-i18n="emptyResultText">Choose your soil, crop category, specific crop and growth stage, then select Analyse My Field.</p></div>
+          {% endif %}
+          <div class="right-disclaimer"><img src="{{ url_for('static', filename='images/logo.svg') }}" alt=""><span data-i18n="disclaimer">This is a model-based estimate. Always verify with field conditions and local agricultural advice.</span></div>
+        </section>
+      </aside>
+    </div>
+    <footer class="footer"><span>AquaWise © Smart agriculture</span><span>Better decisions. Every drop.</span></footer>
+  </div>
+  <script>
+    window.AQUAWISE_RESULT = {{ result|tojson if result else 'null' }};
+    window.AQUAWISE_ERROR = {{ error|tojson if error else 'null' }};
+    window.AQUAWISE_FORM = {{ form_data|tojson }};
+  </script>
+</body>
+</html>
