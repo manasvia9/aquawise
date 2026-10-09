@@ -64,6 +64,133 @@ def find_location(query):
     return result
 
 
+def _weather_code_from_symbol(symbol):
+    """Map MET Norway symbol names to approximate WMO codes used by the UI."""
+    name = (symbol or "").lower().split("_")[0]
+    if name in {"clearsky", "fair"}:
+        return 0 if name == "clearsky" else 1
+    if name in {"partlycloudy"}:
+        return 2
+    if name in {"cloudy"}:
+        return 3
+    if name in {"fog"}:
+        return 45
+    if "thunder" in name:
+        return 95
+    if "sleet" in name:
+        return 66
+    if "snow" in name:
+        return 71
+    if "rain" in name:
+        if "heavyrain" in name:
+            return 65
+        if "lightrain" in name:
+            return 51
+        return 61
+    return 2
+
+
+def _get_met_norway_weather(latitude, longitude):
+    """Fallback forecast source used when Open-Meteo is rate-limiting this host."""
+    url = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
+    headers = {"User-Agent": "AquaWise-Irrigation-Student-Project/1.0 (contact: manasvi.a9@gmail.com)"}
+    response = requests.get(
+        url,
+        params={"lat": round(float(latitude), 4), "lon": round(float(longitude), 4)},
+        headers=headers,
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    series = payload.get("properties", {}).get("timeseries", [])
+    if not series:
+        raise ValueError("The alternate weather service returned no forecast data.")
+
+    hourly_time, hourly_temp, hourly_rain = [], [], []
+    hourly_moisture_shallow, hourly_moisture_deep = [], []
+    daily = {}
+    current = None
+
+    for item in series:
+        stamp = item.get("time", "")
+        details = item.get("data", {}).get("instant", {}).get("details", {})
+        if not stamp or "air_temperature" not in details:
+            continue
+        symbol = (
+            item.get("data", {}).get("next_1_hours", {}).get("summary", {}).get("symbol_code")
+            or item.get("data", {}).get("next_6_hours", {}).get("summary", {}).get("symbol_code")
+            or item.get("data", {}).get("next_12_hours", {}).get("summary", {}).get("symbol_code")
+        )
+        next_hour = item.get("data", {}).get("next_1_hours", {}).get("details", {})
+        rain = float(next_hour.get("precipitation_amount") or 0.0)
+        temperature = float(details.get("air_temperature") or 0.0)
+        humidity = details.get("relative_humidity")
+        wind = details.get("wind_speed")
+        row = {
+            "time": stamp.replace("Z", "+00:00"),
+            "temperature": temperature,
+            "rain": rain,
+            "humidity": humidity,
+            "wind": wind,
+            "code": _weather_code_from_symbol(symbol),
+        }
+        if current is None:
+            current = {
+                "time": row["time"],
+                "temperature_2m": temperature,
+                "relative_humidity_2m": humidity,
+                "precipitation": 0.0,
+                "weather_code": row["code"],
+                "wind_speed_10m": wind,
+            }
+        hourly_time.append(row["time"])
+        hourly_temp.append(temperature)
+        hourly_rain.append(rain)
+        # MET Norway does not provide soil moisture in this endpoint.
+        hourly_moisture_shallow.append(None)
+        hourly_moisture_deep.append(None)
+
+        day = row["time"][:10]
+        if day not in daily:
+            daily[day] = {"temps": [], "rain": 0.0, "codes": []}
+        daily[day]["temps"].append(temperature)
+        daily[day]["rain"] += rain
+        daily[day]["codes"].append(row["code"])
+
+    if current is None or not hourly_time:
+        raise ValueError("The alternate weather service returned incomplete forecast data.")
+
+    daily_dates = sorted(daily)[:7]
+    daily_max, daily_min, daily_rain, daily_probability = [], [], [], []
+    for day in daily_dates:
+        entry = daily[day]
+        daily_max.append(round(max(entry["temps"]), 1))
+        daily_min.append(round(min(entry["temps"]), 1))
+        daily_rain.append(round(entry["rain"], 1))
+        # MET Norway compact forecast does not provide precipitation probability.
+        daily_probability.append(None)
+
+    return {
+        "current": current,
+        "hourly": {
+            "time": hourly_time,
+            "temperature_2m": hourly_temp,
+            "precipitation": hourly_rain,
+            "precipitation_probability": [None] * len(hourly_time),
+            "soil_moisture_0_to_10cm": hourly_moisture_shallow,
+            "soil_moisture_10_to_40cm": hourly_moisture_deep,
+        },
+        "daily": {
+            "time": daily_dates,
+            "temperature_2m_max": daily_max,
+            "temperature_2m_min": daily_min,
+            "precipitation_sum": daily_rain,
+            "precipitation_probability_max": daily_probability,
+        },
+        "_provider": "MET Norway (fallback; soil moisture and rain probability unavailable)",
+    }
+
+
 def get_weather(latitude, longitude):
     cache_key = (round(float(latitude), 3), round(float(longitude), 3))
     cached = WEATHER_CACHE.get(cache_key)
@@ -73,39 +200,31 @@ def get_weather(latitude, longitude):
     params = {
         "latitude": latitude,
         "longitude": longitude,
-        "current": (
-            "temperature_2m,relative_humidity_2m,precipitation,"
-            "weather_code,wind_speed_10m"
-        ),
-        "hourly": (
-            "temperature_2m,precipitation,precipitation_probability,"
-            "soil_moisture_0_to_10cm,soil_moisture_10_to_40cm"
-        ),
-        "daily": (
-            "temperature_2m_max,temperature_2m_min,precipitation_sum,"
-            "precipitation_probability_max"
-        ),
+        "current": "temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m",
+        "hourly": "temperature_2m,precipitation,precipitation_probability,soil_moisture_0_to_10cm,soil_moisture_10_to_40cm",
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max",
         "forecast_days": 7,
         "timezone": "auto",
     }
 
-    # Do not repeatedly retry HTTP 429; that can worsen rate limiting.
-    response = requests.get(WEATHER_URL, params=params, timeout=20)
-    if response.status_code == 429:
-        retry_after = response.headers.get("Retry-After")
-        if retry_after:
+    try:
+        response = requests.get(WEATHER_URL, params=params, timeout=20)
+        if response.status_code == 429:
+            app.logger.warning("Open-Meteo returned HTTP 429; trying MET Norway fallback.")
+            raise requests.HTTPError("Open-Meteo rate limited this request (HTTP 429).", response=response)
+        response.raise_for_status()
+        data = response.json()
+        if "current" not in data or "hourly" not in data or "daily" not in data:
+            raise ValueError("Open-Meteo returned incomplete weather data.")
+        data["_provider"] = "Open-Meteo"
+    except (requests.RequestException, ValueError) as primary_error:
+        try:
+            data = _get_met_norway_weather(latitude, longitude)
+        except (requests.RequestException, ValueError, KeyError) as fallback_error:
+            app.logger.warning("Weather providers failed. Open-Meteo: %s; MET Norway: %s", primary_error, fallback_error)
             raise ValueError(
-                "The weather provider is rate-limiting requests. "
-                f"Please wait at least {retry_after} seconds and try again."
-            )
-        raise ValueError(
-            "The weather provider is temporarily rate-limiting requests. "
-            "Please try again later."
-        )
-    response.raise_for_status()
-    data = response.json()
-    if "current" not in data or "hourly" not in data or "daily" not in data:
-        raise ValueError("Weather service returned incomplete data.")
+                "Both weather services are temporarily unavailable. Please try again later."
+            ) from fallback_error
 
     WEATHER_CACHE[cache_key] = {"saved_at": time.time(), "data": data}
     return data
